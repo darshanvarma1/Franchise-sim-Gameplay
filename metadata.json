@@ -1,0 +1,6 @@
+{
+  "name": "Gridiron GM - 3D Football Engine",
+  "description": "Playable 3D physics-driven American football gameplay engine prototype featuring active ragdolls, ballistic spirals, and tactical play calling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
