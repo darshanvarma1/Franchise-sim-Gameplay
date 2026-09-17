@@ -246,7 +246,7 @@ export class PlayerModel {
   /**
    * Updates procedural animation and active ragdoll physics blend.
    */
-  public update(dt: number, speed: number, turning: number, isMoving: boolean) {
+  public update(dt: number, speed: number, turning: number, isMoving: boolean, isBackpedaling: boolean = false) {
     if (this.ragdollState === 'NORMAL') {
       this.ragdollBlend = Math.max(0, this.ragdollBlend - dt * 3.0);
       this.stumbleTime = 0;
@@ -255,11 +255,11 @@ export class PlayerModel {
 
       // Normal athletic movement animation
       if (isMoving && speed > 0.3) {
-        const strideFreq = 7.5 + (speed / 9.0) * 8.5; // Stride scales with speed
+        const strideFreq = (7.5 + (speed / 9.0) * 8.5) * (isBackpedaling ? 0.72 : 1); // Stride scales with speed
         this.runCycle += dt * strideFreq;
 
-        const armSwing = Math.sin(this.runCycle) * 0.75;
-        const legSwing = Math.sin(this.runCycle) * 0.85;
+        const armSwing = Math.sin(this.runCycle) * (isBackpedaling ? 0.5 : 0.75);
+        const legSwing = Math.sin(this.runCycle) * (isBackpedaling ? 0.55 : 0.85);
 
         // Legs
         this.leftHip.rotation.x = legSwing;
@@ -285,7 +285,7 @@ export class PlayerModel {
         }
 
         // Torso athletic lean & banking into turns
-        const forwardLean = 0.18 + (speed / 10.0) * 0.22;
+        const forwardLean = isBackpedaling ? -0.05 : 0.18 + (speed / 10.0) * 0.22;
         this.torso.rotation.x = forwardLean;
         this.torso.rotation.z = -turning * 0.25; // Bank into turn
         this.torso.rotation.y = Math.sin(this.runCycle) * 0.12;

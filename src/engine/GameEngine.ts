@@ -33,7 +33,17 @@ import {
 } from '../physics/PhysicsMath';
 import { resetDrive, resolveOffensivePlay } from '../football/GameRules';
 import { predictRoutePosition } from '../football/RouteMath';
+import { sampleDropback } from '../football/DropbackMath';
 import { sounds } from '../audio/SoundEffects';
+
+export interface ReceiverScreenPosition {
+  id: 'WR1' | 'WR2' | 'WR3';
+  route: RouteType;
+  x: number;
+  y: number;
+  onScreen: boolean;
+  behindCamera: boolean;
+}
 
 export interface PlayerEntity {
   id: string;
@@ -54,6 +64,7 @@ export interface PlayerEntity {
   isEngagedWithBlocker: boolean;
   blockerTimer: number;
   tackleCooldown: number;
+  isBackpedaling: boolean;
 }
 
 export class GameEngine {
@@ -73,6 +84,7 @@ export class GameEngine {
   public currentPlay: PlayDefinition = PLAYBOOK[0];
   public downState: DownState;
   public throwType: ThrowType = 'TOUCH';
+  public isPaused: boolean = false;
 
   // Timers
   public playClock: number = 0;
@@ -98,6 +110,9 @@ export class GameEngine {
   public lastTackleForce: number = 0;
   private resetDriveAfterPlay: boolean = false;
   private lastNotifiedClockSecond: number = 900;
+  private dropbackElapsed: number = 0;
+  private dropbackStartZ: number = 0;
+  private dropbackActive: boolean = false;
 
   private lastTime: number = performance.now();
   private animationFrameId: number = 0;
@@ -225,6 +240,7 @@ export class GameEngine {
         isEngagedWithBlocker: false,
         blockerTimer: 0,
         tackleCooldown: 0,
+        isBackpedaling: false,
       });
     });
 
@@ -254,6 +270,7 @@ export class GameEngine {
         isEngagedWithBlocker: false,
         blockerTimer: 0,
         tackleCooldown: 0,
+        isBackpedaling: false,
       });
     });
   }
@@ -278,6 +295,9 @@ export class GameEngine {
     this.whistleTimer = 0;
     this.resetTimer = 0;
     this.resetDriveAfterPlay = false;
+    this.dropbackActive = false;
+    this.dropbackElapsed = 0;
+    this.clearMovementInput();
 
     const losZ = (this.downState.lineOfScrimmage - 50) * YARD_TO_METER;
 
@@ -297,6 +317,7 @@ export class GameEngine {
       player.model.isHoldingBall = pos === 'QB';
       player.isEngagedWithBlocker = false;
       player.tackleCooldown = 0;
+      player.isBackpedaling = false;
       player.currentWaypointIndex = 0;
       player.model.resetRagdoll();
       player.model.group.position.copy(player.pos);
@@ -335,6 +356,7 @@ export class GameEngine {
       player.model.isHoldingBall = false;
       player.isEngagedWithBlocker = false;
       player.tackleCooldown = 0;
+      player.isBackpedaling = false;
       player.currentWaypointIndex = 0;
       player.model.resetRagdoll();
       player.model.group.position.copy(player.pos);
@@ -369,9 +391,17 @@ export class GameEngine {
    * Snaps the ball to start active play
    */
   public snapBall() {
-    if (this.playPhase !== 'PRE_SNAP') return;
+    if (this.playPhase !== 'PRE_SNAP' || this.isPaused) return;
     this.playPhase = 'PLAY_ACTIVE';
     this.playClock = 0;
+    const qb = this.players.get('QB');
+    if (this.currentPlay.type === 'PASS' && this.currentPlay.dropback.style !== 'NONE' && qb) {
+      this.dropbackActive = true;
+      this.dropbackElapsed = 0;
+      this.dropbackStartZ = qb.pos.z;
+      qb.isBackpedaling = true;
+      qb.heading = 0;
+    }
     sounds.playSnap();
     this.notifyState();
   }
@@ -380,7 +410,7 @@ export class GameEngine {
    * Initiates throwing to a receiver
    */
   public throwToReceiver(receiverKey: 'WR1' | 'WR2' | 'WR3', throwType: ThrowType = this.throwType) {
-    if (this.playPhase !== 'PLAY_ACTIVE' || this.controlledPlayerId !== 'QB') return;
+    if (this.isPaused || this.playPhase !== 'PLAY_ACTIVE' || this.controlledPlayerId !== 'QB') return;
 
     const qb = this.players.get('QB');
     const receiver = this.players.get(receiverKey);
@@ -392,6 +422,7 @@ export class GameEngine {
     this.ballCarrierId = null;
     qb.hasBall = false;
     qb.model.isHoldingBall = false;
+    this.cancelDropback();
 
     // Release position at QB shoulder level
     const releaseOffset = new THREE.Vector3(0.3, 1.9, 0.2)
@@ -459,6 +490,8 @@ export class GameEngine {
    * Core frame update loop (60 FPS)
    */
   public update(dt: number) {
+    if (this.isPaused) return;
+
     // Clamp delta time to avoid large physics steps
     const safeDt = Math.min(dt, 0.05);
 
@@ -521,6 +554,16 @@ export class GameEngine {
     const player = this.players.get(this.controlledPlayerId);
     if (!player || player.model.ragdollState !== 'NORMAL') return;
 
+    if (player.id === 'QB' && this.dropbackActive) {
+      const inputMagnitude = Math.hypot(this.input.lateral, this.input.forward);
+      if (inputMagnitude > 0.35) {
+        this.cancelDropback();
+      } else {
+        this.updateDropback(player, dt);
+        return;
+      }
+    }
+
     // Movement direction from user input (WASD)
     const attackDirection = player.side === 'OFFENSE' ? 1 : -1;
     const inputDir = new THREE.Vector3(
@@ -557,6 +600,31 @@ export class GameEngine {
 
     player.model.group.position.copy(player.pos);
     player.model.group.rotation.y = player.heading;
+  }
+
+  private updateDropback(qb: PlayerEntity, dt: number) {
+    this.dropbackElapsed += dt;
+    const sample = sampleDropback(this.currentPlay.dropback, this.dropbackElapsed);
+    const previousZ = qb.pos.z;
+    qb.pos.z = this.dropbackStartZ - sample.depthYards * YARD_TO_METER;
+    qb.vel.set(0, 0, dt > 0 ? (qb.pos.z - previousZ) / dt : 0);
+    qb.heading = 0;
+    qb.isBackpedaling = sample.phase === 'RETREAT';
+    qb.model.group.position.copy(qb.pos);
+    qb.model.group.rotation.y = qb.heading;
+
+    if (sample.complete) {
+      this.cancelDropback();
+    }
+  }
+
+  private cancelDropback() {
+    this.dropbackActive = false;
+    const qb = this.players.get('QB');
+    if (qb) {
+      qb.isBackpedaling = false;
+      qb.vel.set(0, 0, 0);
+    }
   }
 
   /**
@@ -997,7 +1065,7 @@ export class GameEngine {
       const speed = player.vel.length();
       const isMoving = speed > 0.2;
       const turning = player.model.group.rotation.y - player.heading;
-      player.model.update(dt, speed, turning, isMoving);
+      player.model.update(dt, speed, turning, isMoving, player.isBackpedaling);
     });
   }
 
@@ -1196,6 +1264,60 @@ export class GameEngine {
     }
   }
 
+  public clearMovementInput() {
+    if (!this.input) return;
+    this.input.forward = 0;
+    this.input.lateral = 0;
+    this.input.sprint = false;
+  }
+
+  public setPaused(paused: boolean) {
+    this.isPaused = paused;
+    if (paused) this.clearMovementInput();
+    this.lastTime = performance.now();
+  }
+
+  public togglePaused(): boolean {
+    this.setPaused(!this.isPaused);
+    return this.isPaused;
+  }
+
+  public getReceiverScreenPositions(width: number, height: number): ReceiverScreenPosition[] {
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return [];
+
+    const camera = this.cameraManager.camera;
+    camera.updateMatrixWorld(true);
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const horizontalMargin = Math.min(46, width * 0.12);
+    const topMargin = Math.min(96, height * 0.16);
+    const bottomMargin = Math.min(112, height * 0.18);
+
+    return (['WR1', 'WR2', 'WR3'] as const).flatMap((id) => {
+      const receiver = this.players.get(id);
+      if (!receiver || !receiver.routeType) return [];
+
+      const world = receiver.pos.clone();
+      world.y += 1.65;
+      const toTarget = world.clone().sub(camera.position);
+      const behindCamera = forward.dot(toTarget) <= 0;
+      const projected = world.clone().project(camera);
+      const rawX = ((projected.x + 1) / 2) * width;
+      const rawY = ((1 - projected.y) / 2) * height;
+      const depthVisible = projected.z >= -1 && projected.z <= 1;
+      const onScreen = !behindCamera && depthVisible && projected.x >= -1 && projected.x <= 1 && projected.y >= -1 && projected.y <= 1;
+
+      return [{
+        id,
+        route: receiver.routeType,
+        x: THREE.MathUtils.clamp(rawX, horizontalMargin, width - horizontalMargin),
+        y: THREE.MathUtils.clamp(rawY, topMargin, height - bottomMargin),
+        onScreen,
+        behindCamera,
+      }];
+    });
+  }
+
   public getBallCarrier(): PlayerEntity | null {
     if (this.ballCarrierId) {
       return this.players.get(this.ballCarrierId) || null;
@@ -1259,6 +1381,7 @@ export class GameEngine {
     if (this.destroyed) return;
     this.destroyed = true;
     this.stop();
+    this.clearMovementInput();
     this.onStateChangeCallback = undefined;
 
     const canvas = this.renderer.domElement;

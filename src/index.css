@@ -15,3 +15,10 @@ body,
   position: absolute;
   inset: 0;
 }
+
+#gameplay-root,
+#gameplay-canvas-host,
+#gameplay-canvas-host canvas {
+  touch-action: none;
+  overscroll-behavior: none;
+}

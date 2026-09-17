@@ -34,6 +34,15 @@ export type RouteType = 'GO' | 'SLANT' | 'OUT' | 'CURL' | 'DRAG' | 'BLOCK' | 'HA
 
 export type ThrowType = 'LOB' | 'TOUCH' | 'BULLET';
 
+export type DropbackStyle = 'QUICK' | 'STANDARD' | 'DEEP' | 'NONE';
+
+export interface DropbackConfig {
+  style: DropbackStyle;
+  depthYards: number;
+  durationSeconds: number;
+  plantSeconds: number;
+}
+
 export interface RouteWaypoint {
   x: number; // Lateral offset from snap point
   z: number; // Downfield distance (yards or meters)
@@ -45,6 +54,7 @@ export interface PlayDefinition {
   name: string;
   type: PlayType;
   description: string;
+  dropback: DropbackConfig;
   routes: {
     WR1: RouteType;
     WR2: RouteType;

@@ -6,6 +6,7 @@ export const PLAYBOOK: PlayDefinition[] = [
     name: 'Quick Slants',
     type: 'PASS',
     description: 'Rapid 3-step drop. WRs cut inside at 45° across middle seam for fast rhythmic throws.',
+    dropback: { style: 'QUICK', depthYards: 2.25, durationSeconds: 0.75, plantSeconds: 0.16 },
     routes: {
       WR1: 'SLANT',
       WR2: 'SLANT',
@@ -18,6 +19,7 @@ export const PLAYBOOK: PlayDefinition[] = [
     name: 'Mesh Under',
     type: 'PASS',
     description: 'Crossing drag routes create pick action underneath, while WR1 curls as safety valve.',
+    dropback: { style: 'STANDARD', depthYards: 3.75, durationSeconds: 1.0, plantSeconds: 0.2 },
     routes: {
       WR1: 'CURL',
       WR2: 'DRAG',
@@ -30,6 +32,7 @@ export const PLAYBOOK: PlayDefinition[] = [
     name: 'Four Verticals',
     type: 'PASS',
     description: 'Deep aggressive attack. Outside receivers sprint streaks while slot attacks deep seam.',
+    dropback: { style: 'DEEP', depthYards: 5.5, durationSeconds: 1.3, plantSeconds: 0.24 },
     routes: {
       WR1: 'GO',
       WR2: 'GO',
@@ -42,6 +45,7 @@ export const PLAYBOOK: PlayDefinition[] = [
     name: 'Inside Zone',
     type: 'RUN',
     description: 'Direct interior run. Offensive line zone blocks to the right while RB presses the A-gap.',
+    dropback: { style: 'NONE', depthYards: 0, durationSeconds: 0, plantSeconds: 0 },
     routes: {
       WR1: 'BLOCK',
       WR2: 'BLOCK',

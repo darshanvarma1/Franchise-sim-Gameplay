@@ -3,10 +3,10 @@
  * Playable football field simulation with active ragdolls, ballistic spirals, and tactile mechanics.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine/GameEngine';
 import { GameplayHUD } from './components/GameplayHUD';
-import { DownState, PlayDefinition, PlayPhase, ThrowType, DebugTelemetry } from './types';
+import { DownState, PlayDefinition, PlayPhase, DebugTelemetry } from './types';
 import { PLAYBOOK } from './football/Playbook';
 import { CameraPreset } from './camera/GameplayCamera';
 
@@ -28,10 +28,10 @@ export default function App() {
 
   const [playPhase, setPlayPhase] = useState<PlayPhase>('PRE_SNAP');
   const [currentPlay, setCurrentPlay] = useState<PlayDefinition>(PLAYBOOK[0]);
-  const [throwType, setThrowType] = useState<ThrowType>('TOUCH');
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [cameraMode, setCameraMode] = useState<CameraPreset>('TACTICAL');
   const [controlledPlayerId, setControlledPlayerId] = useState<string>('QB');
+  const [isPaused, setIsPaused] = useState(false);
 
   const [telemetry, setTelemetry] = useState<DebugTelemetry>({
     fps: 60,
@@ -97,6 +97,12 @@ export default function App() {
       if (disposed) return;
       const eng = engine;
 
+      if (e.code === 'Escape' || e.code === 'KeyP') {
+        if (!e.repeat) setIsPaused(eng.togglePaused());
+        return;
+      }
+      if (eng.isPaused) return;
+
       switch (e.code) {
         case 'KeyW':
         case 'ArrowUp':
@@ -124,13 +130,13 @@ export default function App() {
           }
           break;
         case 'Digit1':
-          eng.throwToReceiver('WR1');
+          eng.throwToReceiver('WR1', 'TOUCH');
           break;
         case 'Digit2':
-          eng.throwToReceiver('WR2');
+          eng.throwToReceiver('WR2', 'TOUCH');
           break;
         case 'Digit3':
-          eng.throwToReceiver('WR3');
+          eng.throwToReceiver('WR3', 'TOUCH');
           break;
         case 'KeyC':
           const nextCam = eng.cycleCameraMode();
@@ -171,13 +177,12 @@ export default function App() {
       }
     };
 
-    const clearMovementInput = () => {
-      engine.input.forward = 0;
-      engine.input.lateral = 0;
-      engine.input.sprint = false;
-    };
+    const clearMovementInput = () => engine.clearMovementInput();
     const handleVisibilityChange = () => {
-      if (document.hidden) clearMovementInput();
+      if (document.hidden) {
+        engine.setPaused(true);
+        setIsPaused(true);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -214,19 +219,6 @@ export default function App() {
     }
   };
 
-  const handleThrow = (receiver: 'WR1' | 'WR2' | 'WR3', type: ThrowType) => {
-    if (engineRef.current) {
-      engineRef.current.throwToReceiver(receiver, type);
-    }
-  };
-
-  const handleChangeThrowType = (type: ThrowType) => {
-    setThrowType(type);
-    if (engineRef.current) {
-      engineRef.current.throwType = type;
-    }
-  };
-
   const handleToggleDebug = () => {
     if (engineRef.current) {
       engineRef.current.toggleDebugMode();
@@ -241,13 +233,19 @@ export default function App() {
     }
   };
 
-  const handleVirtualMove = (lateral: number, forward: number, sprint: boolean) => {
+  const handleVirtualMove = useCallback((lateral: number, forward: number, sprint: boolean) => {
     if (engineRef.current) {
       engineRef.current.input.lateral = lateral;
       engineRef.current.input.forward = forward;
       engineRef.current.input.sprint = sprint;
     }
+  }, []);
+
+  const handleTogglePause = () => {
+    if (engineRef.current) setIsPaused(engineRef.current.togglePaused());
   };
+
+  const getEngine = useCallback(() => engineRef.current, []);
 
   return (
     <div id="gameplay-root" className="relative h-full w-full overflow-hidden bg-slate-950">
@@ -263,14 +261,14 @@ export default function App() {
         controlledPlayerId={controlledPlayerId}
         onSelectPlay={handleSelectPlay}
         onSnap={handleSnap}
-        onThrow={handleThrow}
-        throwType={throwType}
-        onChangeThrowType={handleChangeThrowType}
         onToggleDebug={handleToggleDebug}
         debugMode={debugMode}
         cameraMode={cameraMode}
         onToggleCamera={handleToggleCamera}
         onVirtualMove={handleVirtualMove}
+        getEngine={getEngine}
+        isPaused={isPaused}
+        onTogglePause={handleTogglePause}
       />
     </div>
   );

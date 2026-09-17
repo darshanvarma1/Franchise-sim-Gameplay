@@ -11,6 +11,9 @@ import {
 } from '../src/football/GameRules.ts';
 import { GameplayCamera } from '../src/camera/GameplayCamera.ts';
 import { predictRoutePosition } from '../src/football/RouteMath.ts';
+import { sampleJoystick } from '../src/input/JoystickMath.ts';
+import { classifyThrowGesture } from '../src/input/ThrowGesture.ts';
+import { sampleDropback } from '../src/football/DropbackMath.ts';
 
 const throwTypes = ['BULLET', 'TOUCH', 'LOB'];
 const distances = [8, 20, 40];
@@ -125,6 +128,25 @@ camera.snapTo(focus, -1);
 assert.ok(camera.camera.position.z > focus.z, 'Defense camera must sit behind a -Z returner');
 camera.snapTo(focus, 1);
 assert.ok(camera.camera.position.z < focus.z, 'Offense camera must sit behind a +Z runner');
+
+const centeredStick = sampleJoystick(3, 3, 50);
+assert.equal(centeredStick.magnitude, 0, 'Joystick dead zone must suppress tiny movement');
+const forwardStick = sampleJoystick(0, -30, 50);
+assert.ok(forwardStick.forward > 0 && Math.abs(forwardStick.lateral) < 1e-9);
+const sprintStick = sampleJoystick(100, 0, 50);
+assert.equal(sprintStick.lateral, 1);
+assert.equal(sprintStick.sprint, true);
+
+assert.equal(classifyThrowGesture(0), 'LOB');
+assert.equal(classifyThrowGesture(179), 'LOB');
+assert.equal(classifyThrowGesture(180), 'TOUCH');
+assert.equal(classifyThrowGesture(449), 'TOUCH');
+assert.equal(classifyThrowGesture(450), 'BULLET');
+
+const dropback = { style: 'STANDARD', depthYards: 4, durationSeconds: 1, plantSeconds: 0.2 };
+assert.deepEqual(sampleDropback(dropback, 0), { phase: 'RETREAT', progress: 0, depthYards: 0, complete: false });
+assert.equal(sampleDropback(dropback, 1.1).phase, 'PLANT');
+assert.deepEqual(sampleDropback(dropback, 1.2), { phase: 'COMPLETE', progress: 1, depthYards: 4, complete: true });
 
 console.log('Gameplay foundation regression: PASS');
 console.table(
