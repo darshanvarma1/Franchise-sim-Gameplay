@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { DownState, PlayDefinition, PlayPhase, ThrowType, DebugTelemetry } from '../types';
 import { PLAYBOOK } from '../football/Playbook';
 import { sounds } from '../audio/SoundEffects';
-import { Volume2, VolumeX, Eye, Play, Sparkles, Activity, ShieldAlert, Camera } from 'lucide-react';
+import { Volume2, VolumeX, Play, Sparkles, Activity, ShieldAlert, Camera } from 'lucide-react';
 import { CameraPreset } from '../camera/GameplayCamera';
+import { formatGameClock } from '../football/GameRules';
 
 interface GameplayHUDProps {
   downState: DownState;
@@ -84,7 +85,7 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
         {/* Quarter & Game Clock */}
         <div className="flex items-center gap-2 font-mono text-xs text-slate-300">
           <span className="rounded bg-slate-800 px-1.5 py-0.5 font-bold text-amber-400">Q{downState.quarter}</span>
-          <span className="font-semibold">02:45</span>
+          <span className="font-semibold">{formatGameClock(downState.clockSeconds)}</span>
         </div>
 
         {/* Audio, Camera & Debug Toggles */}
@@ -255,7 +256,7 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
               <span className="font-black text-4xl tracking-wider uppercase">TOUCHDOWN!</span>
               <Sparkles size={28} />
             </div>
-            <p className="mt-1 font-bold text-sm text-slate-200">WILDCATS SCORE 7 POINTS</p>
+            <p className="mt-1 font-bold text-sm text-slate-200">{downState.playResultText}</p>
           </div>
         </div>
       )}
@@ -319,6 +320,8 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
           <button
             onPointerDown={() => onVirtualMove(0, 1, false)}
             onPointerUp={() => onVirtualMove(0, 0, false)}
+            onPointerCancel={() => onVirtualMove(0, 0, false)}
+            onPointerLeave={() => onVirtualMove(0, 0, false)}
             className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 font-bold text-sm text-white active:bg-blue-600"
           >
             ▲
@@ -327,6 +330,8 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
             <button
               onPointerDown={() => onVirtualMove(-1, 0, false)}
               onPointerUp={() => onVirtualMove(0, 0, false)}
+              onPointerCancel={() => onVirtualMove(0, 0, false)}
+              onPointerLeave={() => onVirtualMove(0, 0, false)}
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 font-bold text-sm text-white active:bg-blue-600"
             >
               ◀
@@ -334,6 +339,8 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
             <button
               onPointerDown={() => onVirtualMove(0, -1, false)}
               onPointerUp={() => onVirtualMove(0, 0, false)}
+              onPointerCancel={() => onVirtualMove(0, 0, false)}
+              onPointerLeave={() => onVirtualMove(0, 0, false)}
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 font-bold text-sm text-white active:bg-blue-600"
             >
               ▼
@@ -341,6 +348,8 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
             <button
               onPointerDown={() => onVirtualMove(1, 0, false)}
               onPointerUp={() => onVirtualMove(0, 0, false)}
+              onPointerCancel={() => onVirtualMove(0, 0, false)}
+              onPointerLeave={() => onVirtualMove(0, 0, false)}
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 font-bold text-sm text-white active:bg-blue-600"
             >
               ▶
@@ -355,7 +364,7 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
         <div className="space-y-0.5 font-mono">
           <div><span className="font-bold text-amber-400">WASD / Arrows</span>: Move QB / Runner</div>
           <div><span className="font-bold text-amber-400">SHIFT</span>: Sprint</div>
-          <div><span className="font-bold text-amber-400">SPACE</span>: Snap / Cut</div>
+          <div><span className="font-bold text-amber-400">SPACE</span>: Snap</div>
           <div><span className="font-bold text-amber-400">1, 2, 3</span>: Pass to WR1, WR2, WR3</div>
           <div><span className="font-bold text-amber-400">C</span>: Camera Angle (Tactical/Broadcast/Action)</div>
           <div><span className="font-bold text-amber-400">` / ~</span>: Toggle Physics Debug</div>

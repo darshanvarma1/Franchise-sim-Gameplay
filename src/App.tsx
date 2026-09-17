@@ -121,18 +121,16 @@ export default function App() {
         case 'Space':
           if (eng.playPhase === 'PRE_SNAP') {
             eng.snapBall();
-          } else {
-            eng.input.action = true;
           }
           break;
         case 'Digit1':
-          eng.throwToReceiver('WR1', throwType);
+          eng.throwToReceiver('WR1');
           break;
         case 'Digit2':
-          eng.throwToReceiver('WR2', throwType);
+          eng.throwToReceiver('WR2');
           break;
         case 'Digit3':
-          eng.throwToReceiver('WR3', throwType);
+          eng.throwToReceiver('WR3');
           break;
         case 'KeyC':
           const nextCam = eng.cycleCameraMode();
@@ -170,14 +168,22 @@ export default function App() {
         case 'ShiftRight':
           eng.input.sprint = false;
           break;
-        case 'Space':
-          eng.input.action = false;
-          break;
       }
+    };
+
+    const clearMovementInput = () => {
+      engine.input.forward = 0;
+      engine.input.lateral = 0;
+      engine.input.sprint = false;
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) clearMovementInput();
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', clearMovementInput);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       disposed = true;
@@ -186,6 +192,8 @@ export default function App() {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', clearMovementInput);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       engine.destroy();
       if (engineRef.current === engine) {
         engineRef.current = null;

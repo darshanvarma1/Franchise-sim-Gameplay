@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BALL_GRAVITY } from '../physics/PhysicsMath';
 
 export class FootballEntity {
   public group: THREE.Group;
@@ -8,6 +9,7 @@ export class FootballEntity {
 
   // Real-time physics properties
   public position: THREE.Vector3 = new THREE.Vector3();
+  public previousPosition: THREE.Vector3 = new THREE.Vector3();
   public velocity: THREE.Vector3 = new THREE.Vector3();
   public angularVelocity: THREE.Vector3 = new THREE.Vector3();
   public isHeld: boolean = true;
@@ -77,23 +79,24 @@ export class FootballEntity {
       const worldPos = new THREE.Vector3();
       this.carrier.getWorldPosition(worldPos);
 
-      // Rotate offset with carrier
-      const rot = this.carrier.rotation.y;
-      const rx = Math.cos(rot) * this.carrierOffset.x - Math.sin(rot) * this.carrierOffset.z;
-      const rz = Math.sin(rot) * this.carrierOffset.x + Math.cos(rot) * this.carrierOffset.z;
+      const worldRotation = new THREE.Quaternion();
+      this.carrier.getWorldQuaternion(worldRotation);
+      const worldOffset = this.carrierOffset.clone().applyQuaternion(worldRotation);
 
-      this.position.set(worldPos.x + rx, this.carrierOffset.y, worldPos.z + rz);
+      this.previousPosition.copy(this.position);
+      this.position.copy(worldPos).add(worldOffset);
       this.group.position.copy(this.position);
-      this.group.rotation.set(0.3, rot, 0);
+      this.group.quaternion.copy(worldRotation);
       return;
     }
 
     if (this.isAirborne) {
-      // Apply gravity
-      this.velocity.y -= 9.81 * dt;
+      this.previousPosition.copy(this.position);
 
-      // Integrate position
+      // Integrate using the same gravity assumed by the launch solver.
       this.position.addScaledVector(this.velocity, dt);
+      this.position.y -= 0.5 * BALL_GRAVITY * dt * dt;
+      this.velocity.y -= BALL_GRAVITY * dt;
 
       // Aerodynamic alignment: ball points in direction of travel
       if (this.velocity.lengthSq() > 1.0) {
@@ -145,6 +148,7 @@ export class FootballEntity {
     this.isAirborne = true;
     this.hasBounced = false;
     this.position.copy(startPos);
+    this.previousPosition.copy(startPos);
     this.velocity.copy(initialVelocity);
     this.spiralAngle = 0;
     this.spinRate = 32.0; // Fast spiral spin
@@ -160,5 +164,6 @@ export class FootballEntity {
     this.hasBounced = false;
     this.carrier = carrier;
     this.carrierOffset.copy(offset);
+    this.previousPosition.copy(this.position);
   }
 }

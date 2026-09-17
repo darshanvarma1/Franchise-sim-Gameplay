@@ -29,7 +29,10 @@ import {
 import {
   calculateBallisticTrajectory,
   computeTackleImpact,
+  distancePointToSegment,
 } from '../physics/PhysicsMath';
+import { resetDrive, resolveOffensivePlay } from '../football/GameRules';
+import { predictRoutePosition } from '../football/RouteMath';
 import { sounds } from '../audio/SoundEffects';
 
 export interface PlayerEntity {
@@ -44,11 +47,13 @@ export interface PlayerEntity {
   targetPos: THREE.Vector3;
   routeType?: RouteType;
   routeWaypoints?: THREE.Vector3[];
+  routeSpeedMultipliers?: number[];
   currentWaypointIndex: number;
   assignedOpponentId?: string;
   hasBall: boolean;
   isEngagedWithBlocker: boolean;
   blockerTimer: number;
+  tackleCooldown: number;
 }
 
 export class GameEngine {
@@ -68,9 +73,6 @@ export class GameEngine {
   public currentPlay: PlayDefinition = PLAYBOOK[0];
   public downState: DownState;
   public throwType: ThrowType = 'TOUCH';
-  public throwChargeTime: number = 0;
-  public isChargingThrow: boolean = false;
-  public pendingThrowTarget: 'WR1' | 'WR2' | 'WR3' | null = null;
 
   // Timers
   public playClock: number = 0;
@@ -88,13 +90,14 @@ export class GameEngine {
     forward: 0, // -1 to 1
     lateral: 0, // -1 to 1
     sprint: false,
-    action: false, // Juke/hurdle/snap
   };
 
   // Trajectory tracking
   public targetPassReceiverId: string | null = null;
   public passAirTime: number = 0;
   public lastTackleForce: number = 0;
+  private resetDriveAfterPlay: boolean = false;
+  private lastNotifiedClockSecond: number = 900;
 
   private lastTime: number = performance.now();
   private animationFrameId: number = 0;
@@ -221,6 +224,7 @@ export class GameEngine {
         hasBall: false,
         isEngagedWithBlocker: false,
         blockerTimer: 0,
+        tackleCooldown: 0,
       });
     });
 
@@ -249,6 +253,7 @@ export class GameEngine {
         hasBall: false,
         isEngagedWithBlocker: false,
         blockerTimer: 0,
+        tackleCooldown: 0,
       });
     });
   }
@@ -272,6 +277,7 @@ export class GameEngine {
     this.passAirTime = 0;
     this.whistleTimer = 0;
     this.resetTimer = 0;
+    this.resetDriveAfterPlay = false;
 
     const losZ = (this.downState.lineOfScrimmage - 50) * YARD_TO_METER;
 
@@ -288,7 +294,9 @@ export class GameEngine {
       player.vel.set(0, 0, 0);
       player.heading = 0; // Facing downfield (+Z)
       player.hasBall = pos === 'QB';
+      player.model.isHoldingBall = pos === 'QB';
       player.isEngagedWithBlocker = false;
+      player.tackleCooldown = 0;
       player.currentWaypointIndex = 0;
       player.model.resetRagdoll();
       player.model.group.position.copy(player.pos);
@@ -310,6 +318,7 @@ export class GameEngine {
             losZ + wpt.z * YARD_TO_METER
           );
         });
+        player.routeSpeedMultipliers = rawWaypoints.map((wpt) => wpt.speedMult ?? 1);
       }
     });
 
@@ -323,7 +332,9 @@ export class GameEngine {
       player.vel.set(0, 0, 0);
       player.heading = Math.PI; // Facing offense (-Z)
       player.hasBall = false;
+      player.model.isHoldingBall = false;
       player.isEngagedWithBlocker = false;
+      player.tackleCooldown = 0;
       player.currentWaypointIndex = 0;
       player.model.resetRagdoll();
       player.model.group.position.copy(player.pos);
@@ -378,10 +389,14 @@ export class GameEngine {
     this.playPhase = 'BALL_IN_AIR';
     this.targetPassReceiverId = receiverKey;
     this.passAirTime = 0;
+    this.ballCarrierId = null;
+    qb.hasBall = false;
     qb.model.isHoldingBall = false;
 
     // Release position at QB shoulder level
-    const throwOrigin = qb.pos.clone().add(new THREE.Vector3(0.3, 1.9, 0.2));
+    const releaseOffset = new THREE.Vector3(0.3, 1.9, 0.2)
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), qb.heading);
+    const throwOrigin = qb.pos.clone().add(releaseOffset);
 
     // Accuracy variation based on QB rating and whether QB is scrambling
     const qbSpeed = qb.vel.length();
@@ -392,10 +407,44 @@ export class GameEngine {
       (Math.random() - 0.5) * throwVar
     );
 
-    const trajectory = calculateBallisticTrajectory(
+    const initialEstimate = calculateBallisticTrajectory(
       throwOrigin,
       receiver.pos,
       receiver.vel,
+      throwType,
+      new THREE.Vector3(),
+      qb.physics.throwVelocity
+    );
+    let predictedCatchPoint = predictRoutePosition(
+      receiver.pos,
+      receiver.routeWaypoints,
+      receiver.routeSpeedMultipliers,
+      receiver.currentWaypointIndex,
+      receiver.physics.maxSpeed * 0.95,
+      initialEstimate.flightTime,
+      receiver.vel
+    );
+    const refinedEstimate = calculateBallisticTrajectory(
+      throwOrigin,
+      predictedCatchPoint,
+      new THREE.Vector3(),
+      throwType,
+      new THREE.Vector3(),
+      qb.physics.throwVelocity
+    );
+    predictedCatchPoint = predictRoutePosition(
+      receiver.pos,
+      receiver.routeWaypoints,
+      receiver.routeSpeedMultipliers,
+      receiver.currentWaypointIndex,
+      receiver.physics.maxSpeed * 0.95,
+      refinedEstimate.flightTime,
+      receiver.vel
+    );
+    const trajectory = calculateBallisticTrajectory(
+      throwOrigin,
+      predictedCatchPoint,
+      new THREE.Vector3(),
       throwType,
       accuracyOffset,
       qb.physics.throwVelocity
@@ -415,6 +464,13 @@ export class GameEngine {
 
     if (this.playPhase !== 'PRE_SNAP') {
       this.playClock += safeDt;
+    }
+    if (
+      this.playPhase === 'PLAY_ACTIVE' ||
+      this.playPhase === 'BALL_IN_AIR' ||
+      this.playPhase === 'RUN_AFTER_CATCH'
+    ) {
+      this.downState.clockSeconds = Math.max(0, this.downState.clockSeconds - safeDt);
     }
 
     // 1. Update Controlled Player
@@ -447,6 +503,11 @@ export class GameEngine {
 
     // 8. Update Telemetry
     this.updateTelemetry();
+    const displayedClockSecond = Math.ceil(this.downState.clockSeconds);
+    if (displayedClockSecond !== this.lastNotifiedClockSecond) {
+      this.lastNotifiedClockSecond = displayedClockSecond;
+      this.notifyState();
+    }
   }
 
   /**
@@ -461,7 +522,12 @@ export class GameEngine {
     if (!player || player.model.ragdollState !== 'NORMAL') return;
 
     // Movement direction from user input (WASD)
-    const inputDir = new THREE.Vector3(this.input.lateral, 0, this.input.forward);
+    const attackDirection = player.side === 'OFFENSE' ? 1 : -1;
+    const inputDir = new THREE.Vector3(
+      this.input.lateral,
+      0,
+      this.input.forward * attackDirection
+    );
     const hasInput = inputDir.lengthSq() > 0.01;
 
     let targetSpeed = 0;
@@ -570,11 +636,17 @@ export class GameEngine {
 
     // Once a pass is caught or run active, receivers block downfield
     if (this.playPhase === 'RUN_AFTER_CATCH') {
+      const carrier = this.getBallCarrier();
+      if (carrier && carrier.side !== player.side) {
+        this.steerToward(player, carrier.pos, player.physics.maxSpeed * 0.95, dt);
+        return;
+      }
+
       // Find nearest defender to stalk block
       let nearestDef: PlayerEntity | null = null;
       let minDist = 8.0;
       this.players.forEach((other) => {
-        if (other.side === 'DEFENSE') {
+        if (other.side !== player.side) {
           const d = player.pos.distanceTo(other.pos);
           if (d < minDist) {
             minDist = d;
@@ -589,15 +661,22 @@ export class GameEngine {
       return;
     }
 
-    const currentTarget = player.routeWaypoints[player.currentWaypointIndex];
+    let currentTarget = player.routeWaypoints[player.currentWaypointIndex];
     if (!currentTarget) return;
 
     const distToWpt = player.pos.distanceTo(currentTarget);
     if (distToWpt < 1.0 && player.currentWaypointIndex < player.routeWaypoints.length - 1) {
       player.currentWaypointIndex++;
+      currentTarget = player.routeWaypoints[player.currentWaypointIndex];
     }
 
-    this.steerToward(player, currentTarget, player.physics.maxSpeed * 0.95, dt);
+    const speedMultiplier = player.routeSpeedMultipliers?.[player.currentWaypointIndex] ?? 1;
+    this.steerToward(
+      player,
+      currentTarget,
+      player.physics.maxSpeed * 0.95 * speedMultiplier,
+      dt
+    );
   }
 
   /**
@@ -633,6 +712,10 @@ export class GameEngine {
   private updatePassRusher(player: PlayerEntity, dt: number) {
     const target = this.getBallCarrierOrQB();
     if (!target) return;
+    if (this.playPhase === 'RUN_AFTER_CATCH' && target.side === player.side) {
+      player.vel.multiplyScalar(Math.pow(0.9, dt * 60));
+      return;
+    }
 
     // Navigate towards QB or ball carrier
     this.steerToward(player, target.pos, player.physics.maxSpeed * 0.85, dt);
@@ -647,7 +730,7 @@ export class GameEngine {
 
     if (this.currentPlay.type === 'RUN' || this.playPhase === 'RUN_AFTER_CATCH') {
       // Aggressive pursuit of runner
-      if (carrier) {
+      if (carrier && carrier.side !== player.side) {
         this.steerToward(player, carrier.pos, player.physics.maxSpeed * 0.95, dt);
       }
     } else {
@@ -681,7 +764,7 @@ export class GameEngine {
 
     if (this.playPhase === 'RUN_AFTER_CATCH') {
       const carrier = this.getBallCarrier();
-      if (carrier) {
+      if (carrier && carrier.side !== player.side) {
         this.steerToward(player, carrier.pos, player.physics.maxSpeed * 1.0, dt);
       }
       return;
@@ -736,52 +819,77 @@ export class GameEngine {
     if (this.playPhase === 'BALL_IN_AIR' && this.football.isAirborne) {
       this.passAirTime += dt;
 
-      // Check for receiver catch
-      const targetReceiver = this.targetPassReceiverId ? this.players.get(this.targetPassReceiverId) : null;
-      if (targetReceiver) {
-        const dist = this.football.position.distanceTo(targetReceiver.pos);
-        // Permissive, fun catch envelope (height 0.4m to 2.8m, dist < catchRadius)
-        if (dist < targetReceiver.physics.catchRadius && this.football.position.y > 0.4 && this.football.position.y < 2.8) {
-          // Complete Pass!
-          sounds.playCatch();
-          this.football.attachTo(targetReceiver.model.root);
-          targetReceiver.hasBall = true;
-          targetReceiver.model.isHoldingBall = true;
-          this.ballCarrierId = targetReceiver.id;
-          this.controlledPlayerId = targetReceiver.id;
-          this.playPhase = 'RUN_AFTER_CATCH';
-          this.notifyState();
+      // Swept catch checks prevent fast throws from tunnelling between rendered frames.
+      const eligibleReceiverIds = [
+        this.targetPassReceiverId,
+        'WR1',
+        'WR2',
+        'WR3',
+        'RB',
+      ].filter((id, index, ids): id is string => Boolean(id) && ids.indexOf(id) === index);
+
+      for (const receiverId of eligibleReceiverIds) {
+        const receiver = this.players.get(receiverId);
+        if (
+          receiver?.side === 'OFFENSE' &&
+          this.isBallWithinCatchEnvelope(receiver, receiver.physics.catchRadius * 0.75, 0.35, 2.85)
+        ) {
+          this.secureCatch(receiver, false);
           return;
         }
       }
 
-      // Check for interception by nearby defender
-      this.players.forEach((def) => {
-        if (def.side === 'DEFENSE' && this.playPhase === 'BALL_IN_AIR') {
-          const dist = this.football.position.distanceTo(def.pos);
-          if (dist < 1.3 && this.football.position.y > 0.6 && this.football.position.y < 2.5 && this.passAirTime > 0.5) {
-            // Interception!
-            sounds.playCatch();
-            this.football.attachTo(def.model.root);
-            def.hasBall = true;
-            def.model.isHoldingBall = true;
-            this.ballCarrierId = def.id;
-            this.controlledPlayerId = def.id;
-            this.playPhase = 'RUN_AFTER_CATCH';
-            this.downState.playResultText = 'INTERCEPTED!';
-            this.notifyState();
+      if (this.passAirTime > 0.35) {
+        for (const defender of this.players.values()) {
+          if (
+            defender.side === 'DEFENSE' &&
+            this.isBallWithinCatchEnvelope(defender, 1.05, 0.55, 2.65)
+          ) {
+            this.secureCatch(defender, true);
+            return;
           }
         }
-      });
+      }
 
       // Check if ball hit turf (Incomplete)
       if (this.football.hasBounced && this.football.position.y <= 0.12) {
-        this.playPhase = 'PLAY_OVER';
-        sounds.playWhistle();
-        this.downState.playResultText = 'INCOMPLETE PASS';
-        this.notifyState();
+        this.endPlay('Incomplete Pass', this.downState.lineOfScrimmage);
       }
     }
+  }
+
+  private isBallWithinCatchEnvelope(
+    player: PlayerEntity,
+    radius: number,
+    minimumHeight: number,
+    maximumHeight: number
+  ): boolean {
+    const segmentLow = Math.min(this.football.previousPosition.y, this.football.position.y);
+    const segmentHigh = Math.max(this.football.previousPosition.y, this.football.position.y);
+    if (segmentHigh < minimumHeight || segmentLow > maximumHeight) return false;
+
+    const catchCenter = player.pos.clone().add(new THREE.Vector3(0, 1.35, 0));
+    return distancePointToSegment(
+      catchCenter,
+      this.football.previousPosition,
+      this.football.position
+    ) <= radius;
+  }
+
+  private secureCatch(player: PlayerEntity, intercepted: boolean) {
+    sounds.playCatch();
+    this.players.forEach((candidate) => {
+      candidate.hasBall = false;
+      candidate.model.isHoldingBall = false;
+    });
+    this.football.attachTo(player.model.root);
+    player.hasBall = true;
+    player.model.isHoldingBall = true;
+    this.ballCarrierId = player.id;
+    this.controlledPlayerId = player.id;
+    this.playPhase = 'RUN_AFTER_CATCH';
+    if (intercepted) this.downState.playResultText = 'INTERCEPTED!';
+    this.notifyState();
   }
 
   /**
@@ -789,6 +897,9 @@ export class GameEngine {
    */
   private updatePhysicsCollisions(dt: number) {
     const ballCarrier = this.getBallCarrier();
+    this.players.forEach((player) => {
+      player.tackleCooldown = Math.max(0, player.tackleCooldown - dt);
+    });
 
     // 1. Lineman vs Lineman Blocking Collisions
     const oLinemen = ['LT', 'LG', 'C', 'RG', 'RT'];
@@ -831,7 +942,12 @@ export class GameEngine {
     // 2. Tackling: Defenders vs Ball Carrier
     if (ballCarrier && ballCarrier.model.ragdollState !== 'FULL_RAGDOLL') {
       this.players.forEach((defender) => {
-        if (defender.side !== ballCarrier.side && defender.model.ragdollState === 'NORMAL') {
+        if (ballCarrier.model.ragdollState === 'FULL_RAGDOLL') return;
+        if (
+          defender.side !== ballCarrier.side &&
+          defender.model.ragdollState === 'NORMAL' &&
+          defender.tackleCooldown <= 0
+        ) {
           const delta = new THREE.Vector3().subVectors(ballCarrier.pos, defender.pos).setY(0);
           const dist = delta.length();
           const tackleReach = defender.physics.tackleReach;
@@ -850,6 +966,7 @@ export class GameEngine {
             );
 
             this.lastTackleForce = tackle.impactStrength;
+            defender.tackleCooldown = 0.45;
 
             // Apply impulses
             ballCarrier.vel.add(tackle.impulseRunner);
@@ -903,14 +1020,31 @@ export class GameEngine {
     if (carrier) {
       const carrierYard = 50 + carrier.pos.z / YARD_TO_METER;
 
-      // 1. Touchdown! (Crossed opponent 100 yard goal line)
-      if (carrierYard >= 100) {
+      const offenseTouchdown = carrier.side === 'OFFENSE' && carrierYard >= 100;
+      const defenseTouchdown = carrier.side === 'DEFENSE' && carrierYard <= 0;
+
+      // 1. Touchdown in the carrier's attacking direction
+      if (offenseTouchdown || defenseTouchdown) {
         this.playPhase = 'TOUCHDOWN_CELEBRATION';
         sounds.playWhistle();
         sounds.playCrowdCheer();
         this.cameraManager.addTrauma(0.5);
-        this.downState.offenseScore += 7;
-        this.downState.playResultText = 'TOUCHDOWN! +7 PTS';
+        if (offenseTouchdown) this.downState.offenseScore += 7;
+        else this.downState.defenseScore += 7;
+        this.downState.playResultText = defenseTouchdown
+          ? 'PICK SIX! DEFENSE +7'
+          : 'TOUCHDOWN! +7 PTS';
+        this.resetDriveAfterPlay = true;
+        this.notifyState();
+        return;
+      }
+
+      if (carrier.side === 'OFFENSE' && carrierYard <= 0) {
+        this.playPhase = 'PLAY_OVER';
+        sounds.playWhistle();
+        this.downState.defenseScore += 2;
+        this.downState.playResultText = 'SAFETY! DEFENSE +2';
+        this.resetDriveAfterPlay = true;
         this.notifyState();
         return;
       }
@@ -935,7 +1069,7 @@ export class GameEngine {
   /**
    * Whistle blown: calculate forward progress, update downs, advance game
    */
-  private endPlay(reason: string) {
+  private endPlay(reason: string, forcedSpotYard?: number) {
     this.playPhase = 'PLAY_OVER';
     sounds.playWhistle();
 
@@ -943,37 +1077,23 @@ export class GameEngine {
     const oldLos = this.downState.lineOfScrimmage;
 
     let spotYard = oldLos;
-    if (carrier) {
+    if (forcedSpotYard !== undefined) {
+      spotYard = forcedSpotYard;
+    } else if (carrier) {
       spotYard = Math.round(50 + carrier.pos.z / YARD_TO_METER);
       spotYard = Math.max(1, Math.min(99, spotYard));
     }
 
-    const yardsGained = spotYard - oldLos;
-    const yardsToGain = this.downState.firstDownLine - spotYard;
-
-    if (yardsToGain <= 0) {
-      // FIRST DOWN!
-      sounds.playCrowdCheer();
-      this.downState.down = 1;
-      this.downState.distance = 10;
-      this.downState.lineOfScrimmage = spotYard;
-      this.downState.firstDownLine = Math.min(100, spotYard + 10);
-      this.downState.playResultText = `FIRST DOWN! +${yardsGained} YDS (${reason})`;
+    if (carrier?.side === 'DEFENSE') {
+      const returnYards = Math.max(0, Math.round(oldLos - spotYard));
+      this.downState = resetDrive(
+        this.downState,
+        `INTERCEPTION RETURN: ${returnYards} YDS — RESET TO 25`
+      );
     } else {
-      // Advance Down
-      if (this.downState.down < 4) {
-        this.downState.down++;
-        this.downState.distance = yardsToGain;
-        this.downState.lineOfScrimmage = spotYard;
-        this.downState.playResultText = `${yardsGained >= 0 ? '+' : ''}${yardsGained} YDS (${reason})`;
-      } else {
-        // Turnover on Downs
-        this.downState.down = 1;
-        this.downState.distance = 10;
-        this.downState.lineOfScrimmage = 25; // Reset to own 25
-        this.downState.firstDownLine = 35;
-        this.downState.playResultText = 'TURNOVER ON DOWNS — RESET TO 25';
-      }
+      const resolution = resolveOffensivePlay(this.downState, spotYard, reason);
+      this.downState = resolution.nextState;
+      if (resolution.firstDown) sounds.playCrowdCheer();
     }
 
     this.notifyState();
@@ -983,6 +1103,10 @@ export class GameEngine {
    * Resets seamlessly for next snap
    */
   private nextPlay() {
+    if (this.resetDriveAfterPlay) {
+      this.downState = resetDrive(this.downState, '1st & 10 at Own 25');
+      this.resetDriveAfterPlay = false;
+    }
     this.resetToPreSnap();
   }
 
@@ -992,13 +1116,14 @@ export class GameEngine {
   private updateCamera(dt: number) {
     const focusEntity = this.players.get(this.controlledPlayerId) || this.players.get('QB');
     const focusPos = focusEntity ? focusEntity.pos : new THREE.Vector3();
+    const attackDirection: 1 | -1 = focusEntity?.side === 'DEFENSE' ? -1 : 1;
 
     const isPassAir = this.playPhase === 'BALL_IN_AIR';
     const ballPos = this.football.position;
     const receiver = this.targetPassReceiverId ? this.players.get(this.targetPassReceiverId) : null;
     const recPos = receiver ? receiver.pos : undefined;
 
-    this.cameraManager.update(dt, focusPos, isPassAir, ballPos, recPos);
+    this.cameraManager.update(dt, focusPos, isPassAir, ballPos, recPos, attackDirection);
   }
 
   /**
@@ -1058,7 +1183,7 @@ export class GameEngine {
     const newMode = this.cameraManager.cycleMode();
     const focusEntity = this.players.get(this.controlledPlayerId) || this.players.get('QB');
     if (focusEntity) {
-      this.cameraManager.snapTo(focusEntity.pos);
+      this.cameraManager.snapTo(focusEntity.pos, focusEntity.side === 'DEFENSE' ? -1 : 1);
     }
     return newMode;
   }
@@ -1067,7 +1192,7 @@ export class GameEngine {
     this.cameraManager.setMode(mode);
     const focusEntity = this.players.get(this.controlledPlayerId) || this.players.get('QB');
     if (focusEntity) {
-      this.cameraManager.snapTo(focusEntity.pos);
+      this.cameraManager.snapTo(focusEntity.pos, focusEntity.side === 'DEFENSE' ? -1 : 1);
     }
   }
 
@@ -1083,6 +1208,7 @@ export class GameEngine {
   }
 
   private notifyState() {
+    this.updateTelemetry();
     if (this.onStateChangeCallback) {
       this.onStateChangeCallback(this.downState, this.playPhase, this.telemetry);
     }

@@ -79,25 +79,29 @@ export class GameplayCamera {
     return this.mode;
   }
 
-  private calculateNormalTransform(focusPos: THREE.Vector3, config: CameraConfig) {
+  private calculateNormalTransform(
+    focusPos: THREE.Vector3,
+    config: CameraConfig,
+    attackDirection: 1 | -1
+  ) {
     this.normalDesiredPos.set(
       focusPos.x,
       config.height,
-      focusPos.z - config.backDist
+      focusPos.z - config.backDist * attackDirection
     );
     this.normalLookTarget.set(
       focusPos.x,
       config.lookHeight,
-      focusPos.z + config.lookAhead
+      focusPos.z + config.lookAhead * attackDirection
     );
   }
 
   /**
    * Instantly snaps camera behind the player without lerp lag (used on play resets)
    */
-  public snapTo(focusPos: THREE.Vector3) {
+  public snapTo(focusPos: THREE.Vector3, attackDirection: 1 | -1 = 1) {
     const config = CAMERA_PRESETS[this.mode];
-    this.calculateNormalTransform(focusPos, config);
+    this.calculateNormalTransform(focusPos, config, attackDirection);
     this.desiredPos.copy(this.normalDesiredPos);
     this.currentPos.copy(this.desiredPos);
     this.targetPos.copy(this.normalLookTarget);
@@ -124,7 +128,8 @@ export class GameplayCamera {
     focusPos: THREE.Vector3,
     isPassInAir: boolean,
     ballPos?: THREE.Vector3,
-    receiverPos?: THREE.Vector3
+    receiverPos?: THREE.Vector3,
+    attackDirection: 1 | -1 = 1
   ) {
     const config = CAMERA_PRESETS[this.mode];
 
@@ -136,20 +141,24 @@ export class GameplayCamera {
         .multiplyScalar(0.5);
 
       this.targetPos.lerp(
-        new THREE.Vector3(passMidpoint.x * 0.75, 1.2, passMidpoint.z + 2.5),
+        new THREE.Vector3(
+          passMidpoint.x,
+          Math.max(1.2, passMidpoint.y),
+          passMidpoint.z + 2.5 * attackDirection
+        ),
         dt * 4.5
       );
-      this.targetFov = config.fov + 2; // Subtle tightening, never wide fish-eye!
+      this.targetFov = config.fov + 2; // Subtly widen to keep the pass action visible.
 
       // Camera sits moderately elevated behind pass trajectory
       this.desiredPos.set(
-        passMidpoint.x * 0.35,
+        passMidpoint.x,
         config.height + 2.0,
-        Math.max(focusPos.z - 4.0, passMidpoint.z - config.backDist)
+        passMidpoint.z - config.backDist * attackDirection
       );
     } else {
       // Normal pocket / run camera: tightly centered behind ball carrier
-      this.calculateNormalTransform(focusPos, config);
+      this.calculateNormalTransform(focusPos, config, attackDirection);
       this.targetPos.lerp(
         this.normalLookTarget,
         dt * 5.5

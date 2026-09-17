@@ -1,6 +1,14 @@
 import * as THREE from 'three';
 import { ThrowType, RagdollState } from '../types';
 
+export const BALL_GRAVITY = 9.81;
+
+const THROW_SPEED_MULTIPLIER: Record<ThrowType, number> = {
+  BULLET: 1.15,
+  TOUCH: 0.88,
+  LOB: 0.68,
+};
+
 export interface TackleResult {
   severity: 'LOW' | 'MEDIUM' | 'HIGH';
   impactStrength: number;
@@ -90,53 +98,44 @@ export function calculateBallisticTrajectory(
   accuracyOffset: THREE.Vector3,
   qbRatingVelocity: number = 24
 ): { velocity: THREE.Vector3; flightTime: number; targetLeadPoint: THREE.Vector3 } {
-  // Speed tuning based on throw type
-  let speed = qbRatingVelocity;
-  let arcMultiplier = 1.0;
-
-  if (throwType === 'LOB') {
-    speed = Math.max(16, qbRatingVelocity * 0.72);
-    arcMultiplier = 1.9; // Higher parabolic arc
-  } else if (throwType === 'TOUCH') {
-    speed = Math.max(20, qbRatingVelocity * 0.88);
-    arcMultiplier = 1.25;
-  } else {
-    // BULLET
-    speed = Math.max(24, qbRatingVelocity * 1.15);
-    arcMultiplier = 0.65;
-  }
+  // Throw types differ by horizontal velocity. With a single, shared gravity value,
+  // slower throws naturally require a higher launch angle and produce a higher arc.
+  const minimumSpeed = throwType === 'BULLET' ? 24 : throwType === 'TOUCH' ? 20 : 15;
+  const speed = Math.max(minimumSpeed, qbRatingVelocity * THROW_SPEED_MULTIPLIER[throwType]);
 
   // Iteratively estimate flight time to lead moving receiver
-  let estimatedTime = origin.distanceTo(targetPos) / speed;
-  // 2 iterations of Newton-Raphson approximation
-  for (let i = 0; i < 2; i++) {
+  const horizontalDistance = (from: THREE.Vector3, to: THREE.Vector3) =>
+    Math.hypot(to.x - from.x, to.z - from.z);
+
+  let estimatedTime = Math.max(0.25, horizontalDistance(origin, targetPos) / speed);
+  // Refine the lead against the receiver's current velocity.
+  for (let i = 0; i < 3; i++) {
     const projectedPos = targetPos.clone().addScaledVector(targetVel, estimatedTime);
-    const dist = origin.distanceTo(projectedPos);
-    estimatedTime = dist / speed;
+    estimatedTime = Math.max(0.25, horizontalDistance(origin, projectedPos) / speed);
   }
 
   // Future catch point with accuracy variance
   const targetLeadPoint = targetPos
     .clone()
-    .addScaledVector(targetVel, estimatedTime)
-    .add(accuracyOffset);
+    .addScaledVector(targetVel, estimatedTime);
 
-  // Catch point height (waist to chest level: ~1.4m)
-  targetLeadPoint.y = Math.max(1.2, targetLeadPoint.y);
+  targetLeadPoint.x += accuracyOffset.x;
+  targetLeadPoint.z += accuracyOffset.z;
 
-  // Ballistics with gravity (g = 9.81 m/s^2)
-  const g = 9.81 * arcMultiplier;
+  // Preserve vertical accuracy variation around a chest-level target.
+  targetLeadPoint.y = THREE.MathUtils.clamp(1.35 + accuracyOffset.y, 0.9, 2.1);
+
   const deltaX = targetLeadPoint.x - origin.x;
   const deltaZ = targetLeadPoint.z - origin.z;
   const horizontalDist = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
   const deltaY = targetLeadPoint.y - origin.y;
 
   // Horizontal velocity
-  const flightTime = Math.max(0.3, horizontalDist / speed);
+  const flightTime = Math.max(0.25, horizontalDist / speed);
   const vx = deltaX / flightTime;
   const vz = deltaZ / flightTime;
   // Vertical velocity from kinematic formula: y = vy*t - 0.5*g*t^2 => vy = (y + 0.5*g*t^2)/t
-  const vy = (deltaY + 0.5 * g * flightTime * flightTime) / flightTime;
+  const vy = (deltaY + 0.5 * BALL_GRAVITY * flightTime * flightTime) / flightTime;
 
   const velocity = new THREE.Vector3(vx, vy, vz);
 
@@ -145,6 +144,24 @@ export function calculateBallisticTrajectory(
     flightTime,
     targetLeadPoint,
   };
+}
+
+/** Returns the shortest distance from a point to a swept line segment. */
+export function distancePointToSegment(
+  point: THREE.Vector3,
+  segmentStart: THREE.Vector3,
+  segmentEnd: THREE.Vector3
+): number {
+  const segment = new THREE.Vector3().subVectors(segmentEnd, segmentStart);
+  const lengthSq = segment.lengthSq();
+  if (lengthSq < 1e-8) return point.distanceTo(segmentStart);
+
+  const t = THREE.MathUtils.clamp(
+    new THREE.Vector3().subVectors(point, segmentStart).dot(segment) / lengthSq,
+    0,
+    1
+  );
+  return point.distanceTo(segmentStart.clone().addScaledVector(segment, t));
 }
 
 /**
