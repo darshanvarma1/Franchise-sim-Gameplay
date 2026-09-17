@@ -58,13 +58,13 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
   return (
     <div id="gameplay-hud-root" className="pointer-events-none absolute inset-0 select-none overflow-hidden font-sans">
       {/* 1. TOP SCOREBOARD & BROADCAST BANNER */}
-      <div id="scoreboard-banner" className="pointer-events-auto absolute top-4 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-slate-700/80 bg-slate-900/90 px-4 py-2 text-white shadow-2xl backdrop-blur-md">
+      <div id="scoreboard-banner" className="pointer-events-auto absolute top-2 left-1/2 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 rounded-xl border border-slate-700/80 bg-slate-900/90 px-2 py-2 text-white shadow-2xl backdrop-blur-md sm:top-4 sm:gap-3 sm:px-4">
         {/* Home Team */}
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-600 font-black text-xs text-white">
             WIL
           </div>
-          <span className="font-extrabold text-sm tracking-wide text-blue-400">WILDCATS</span>
+          <span className="hidden font-extrabold text-sm tracking-wide text-blue-400 sm:inline">WILDCATS</span>
           <span className="font-mono font-black text-xl text-white">{downState.offenseScore}</span>
         </div>
 
@@ -73,7 +73,7 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
         {/* Away Team */}
         <div className="flex items-center gap-2">
           <span className="font-mono font-black text-xl text-white">{downState.defenseScore}</span>
-          <span className="font-extrabold text-sm tracking-wide text-red-400">TITANS</span>
+          <span className="hidden font-extrabold text-sm tracking-wide text-red-400 sm:inline">TITANS</span>
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-red-700 font-black text-xs text-white">
             TIT
           </div>
@@ -88,15 +88,15 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
         </div>
 
         {/* Audio, Camera & Debug Toggles */}
-        <div className="flex items-center gap-1.5 pl-2">
+        <div className="flex items-center gap-1 pl-1 sm:gap-1.5 sm:pl-2">
           <button
             id="hud-camera-btn"
             onClick={onToggleCamera}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-slate-800 px-2.5 text-xs text-slate-300 transition hover:bg-slate-700 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center gap-1.5 rounded-lg bg-slate-800 text-xs text-slate-300 transition hover:bg-slate-700 hover:text-white sm:w-auto sm:px-2.5"
             title="Toggle Camera View (Key: C) - Tactical / Broadcast / Action"
           >
             <Camera size={14} className="text-amber-400" />
-            <span className="font-bold text-[10px] tracking-wide text-amber-400">{cameraMode}</span>
+            <span className="hidden font-bold text-[10px] tracking-wide text-amber-400 sm:inline">{cameraMode}</span>
           </button>
           <button
             id="hud-mute-btn"
@@ -120,7 +120,12 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
       </div>
 
       {/* 2. DOWN & DISTANCE CHYRON (BOTTOM LEFT) */}
-      <div id="down-distance-chyron" className="absolute bottom-6 left-6 rounded-xl border border-slate-700/80 bg-slate-900/90 p-3.5 text-white shadow-2xl backdrop-blur-md">
+      <div
+        id="down-distance-chyron"
+        className={`absolute left-2 max-w-[calc(100%-1rem)] rounded-xl border border-slate-700/80 bg-slate-900/90 p-3 text-white shadow-2xl backdrop-blur-md sm:bottom-6 sm:left-6 sm:p-3.5 ${
+          playPhase === 'PRE_SNAP' ? 'top-20 bottom-auto sm:top-auto' : 'bottom-4'
+        }`}
+      >
         <div className="flex items-baseline gap-2.5">
           <span className="font-black text-2xl tracking-tight text-amber-400">
             {getDownSuffix(downState.down)} & {downState.distance}
@@ -198,15 +203,15 @@ export const GameplayHUD: React.FC<GameplayHUDProps> = ({
 
       {/* 4. PRE-SNAP PLAY SELECTOR & SNAP BUTTON */}
       {playPhase === 'PRE_SNAP' && (
-        <div id="pre-snap-panel" className="pointer-events-auto absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-3">
+        <div id="pre-snap-panel" className="pointer-events-auto absolute bottom-4 left-1/2 flex w-[calc(100%-1rem)] max-w-3xl -translate-x-1/2 flex-col items-center gap-3 sm:bottom-6">
           {/* Play Selector Cards */}
-          <div className="flex items-center gap-2.5 rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl backdrop-blur-md">
+          <div className="flex w-full items-center gap-2.5 overflow-x-auto rounded-2xl border border-slate-700/80 bg-slate-900/95 p-2 shadow-2xl backdrop-blur-md">
             {PLAYBOOK.map((play) => (
               <button
                 key={play.id}
                 id={`play-select-${play.id}`}
                 onClick={() => onSelectPlay(play)}
-                className={`flex flex-col items-start rounded-xl px-3.5 py-2 text-left transition ${
+                className={`flex shrink-0 flex-col items-start rounded-xl px-3.5 py-2 text-left transition ${
                   currentPlay.id === play.id
                     ? 'border border-blue-500 bg-blue-600/30 text-white ring-1 ring-blue-400'
                     : 'border border-transparent bg-slate-800/80 text-slate-300 hover:bg-slate-700/80'

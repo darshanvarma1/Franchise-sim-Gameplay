@@ -45,13 +45,17 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) return;
+
+    let disposed = false;
 
     // Initialize 3D Physics Game Engine
-    const engine = new GameEngine(containerRef.current);
+    const engine = new GameEngine(container);
     engineRef.current = engine;
 
     engine.setOnStateChange((newDownState, newPhase, newTelemetry) => {
+      if (disposed) return;
       setDownState({ ...newDownState });
       setPlayPhase(newPhase);
       setControlledPlayerId(engine.controlledPlayerId);
@@ -62,26 +66,24 @@ export default function App() {
 
     // Robust Resize handling with ResizeObserver for fullscreen and dynamic dimensions
     const handleResize = () => {
-      if (containerRef.current && engineRef.current) {
-        const w = containerRef.current.clientWidth || window.innerWidth;
-        const h = containerRef.current.clientHeight || window.innerHeight;
-        engineRef.current.resize(w, h);
-      }
+      if (disposed) return;
+      engine.resize(container.clientWidth, container.clientHeight);
     };
     window.addEventListener('resize', handleResize);
 
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
+        if (disposed) return;
         const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0 && engineRef.current) {
-          engineRef.current.resize(width, height);
+        if (width > 0 && height > 0) {
+          engine.resize(width, height);
         }
       }
     });
-    resizeObserver.observe(containerRef.current);
+    resizeObserver.observe(container);
 
     // Initial resize check after DOM paint
-    requestAnimationFrame(() => {
+    const initialResizeFrame = requestAnimationFrame(() => {
       handleResize();
     });
 
@@ -92,8 +94,8 @@ export default function App() {
         e.preventDefault();
       }
 
-      if (!engineRef.current) return;
-      const eng = engineRef.current;
+      if (disposed) return;
+      const eng = engine;
 
       switch (e.code) {
         case 'KeyW':
@@ -144,8 +146,8 @@ export default function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (!engineRef.current) return;
-      const eng = engineRef.current;
+      if (disposed) return;
+      const eng = engine;
 
       switch (e.code) {
         case 'KeyW':
@@ -178,11 +180,16 @@ export default function App() {
     window.addEventListener('keyup', handleKeyUp);
 
     return () => {
+      disposed = true;
+      cancelAnimationFrame(initialResizeFrame);
       resizeObserver.disconnect();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       engine.destroy();
+      if (engineRef.current === engine) {
+        engineRef.current = null;
+      }
     };
   }, []);
 
@@ -235,9 +242,9 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-slate-950">
+    <div id="gameplay-root" className="relative h-full w-full overflow-hidden bg-slate-950">
       {/* 3D WebGL Canvas Container */}
-      <div ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden [&>canvas]:block [&>canvas]:w-full [&>canvas]:h-full" />
+      <div id="gameplay-canvas-host" ref={containerRef} className="absolute inset-0 h-full w-full overflow-hidden [&>canvas]:block [&>canvas]:h-full [&>canvas]:w-full" />
 
       {/* Broadcast Football Gameplay HUD */}
       <GameplayHUD

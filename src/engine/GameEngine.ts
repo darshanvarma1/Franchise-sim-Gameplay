@@ -99,6 +99,7 @@ export class GameEngine {
   private lastTime: number = performance.now();
   private animationFrameId: number = 0;
   private isRunning: boolean = false;
+  private destroyed: boolean = false;
   private onStateChangeCallback?: (downState: DownState, phase: PlayPhase, telemetry: DebugTelemetry) => void;
 
   constructor(container: HTMLElement) {
@@ -107,22 +108,26 @@ export class GameEngine {
     this.scene.background = new THREE.Color(0x0f172a); // Prime-time stadium night atmosphere
     this.scene.fog = new THREE.Fog(0x0f172a, 160, 380);
 
-    const width = container.clientWidth || window.innerWidth || 800;
-    const height = container.clientHeight || window.innerHeight || 600;
+    const width = Number.isFinite(container.clientWidth) && container.clientWidth > 0
+      ? container.clientWidth
+      : 1;
+    const height = Number.isFinite(container.clientHeight) && container.clientHeight > 0
+      ? container.clientHeight
+      : 1;
     const aspect = width / height;
     this.cameraManager = new GameplayCamera(aspect);
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setSize(width, height, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    container.appendChild(this.renderer.domElement);
 
     // Make canvas fill container cleanly
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     this.renderer.domElement.style.display = 'block';
+    container.appendChild(this.renderer.domElement);
 
     // Expose engine to window for console diagnostics if needed
     (window as unknown as { __engine: GameEngine }).__engine = this;
@@ -1087,7 +1092,7 @@ export class GameEngine {
    * Start animation rendering loop
    */
   public start() {
-    if (this.isRunning) return;
+    if (this.isRunning || this.destroyed) return;
     this.isRunning = true;
     this.lastTime = performance.now();
 
@@ -1110,12 +1115,36 @@ export class GameEngine {
   }
 
   public resize(width: number, height: number) {
+    if (
+      this.destroyed ||
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0
+    ) {
+      return;
+    }
+
     this.cameraManager.resize(width / height);
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(width, height, false);
   }
 
   public destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.stop();
+    this.onStateChangeCallback = undefined;
+
+    const canvas = this.renderer.domElement;
+    if (canvas.parentElement) {
+      canvas.parentElement.removeChild(canvas);
+    }
+
     this.renderer.dispose();
+
+    const diagnosticsWindow = window as unknown as { __engine?: GameEngine };
+    if (diagnosticsWindow.__engine === this) {
+      delete diagnosticsWindow.__engine;
+    }
   }
 }

@@ -14,21 +14,21 @@ const CAMERA_PRESETS: Record<CameraPreset, CameraConfig> = {
   TACTICAL: {
     height: 5.4,
     backDist: 7.2,
-    lookAhead: 5.8,
+    lookAhead: 1.5,
     lookHeight: 1.1,
     fov: 44,
   },
   BROADCAST: {
     height: 8.2,
     backDist: 10.5,
-    lookAhead: 7.8,
+    lookAhead: 3.0,
     lookHeight: 0.9,
     fov: 46,
   },
   ACTION: {
     height: 4.0,
     backDist: 5.4,
-    lookAhead: 4.6,
+    lookAhead: 1.0,
     lookHeight: 1.2,
     fov: 42,
   },
@@ -51,6 +51,8 @@ export class GameplayCamera {
   private currentPos: THREE.Vector3 = new THREE.Vector3(0, 5.4, -34.0);
   private baseFov: number = 44;
   private targetFov: number = 44;
+  private normalDesiredPos: THREE.Vector3 = new THREE.Vector3();
+  private normalLookTarget: THREE.Vector3 = new THREE.Vector3();
 
   constructor(aspect: number) {
     const safeAspect = aspect && isFinite(aspect) && aspect > 0 ? aspect : 16 / 9;
@@ -77,22 +79,28 @@ export class GameplayCamera {
     return this.mode;
   }
 
+  private calculateNormalTransform(focusPos: THREE.Vector3, config: CameraConfig) {
+    this.normalDesiredPos.set(
+      focusPos.x,
+      config.height,
+      focusPos.z - config.backDist
+    );
+    this.normalLookTarget.set(
+      focusPos.x,
+      config.lookHeight,
+      focusPos.z + config.lookAhead
+    );
+  }
+
   /**
    * Instantly snaps camera behind the player without lerp lag (used on play resets)
    */
   public snapTo(focusPos: THREE.Vector3) {
     const config = CAMERA_PRESETS[this.mode];
-    this.desiredPos.set(
-      focusPos.x * 0.5,
-      config.height,
-      focusPos.z - config.backDist
-    );
+    this.calculateNormalTransform(focusPos, config);
+    this.desiredPos.copy(this.normalDesiredPos);
     this.currentPos.copy(this.desiredPos);
-    this.targetPos.set(
-      focusPos.x * 0.7,
-      config.lookHeight,
-      focusPos.z + config.lookAhead
-    );
+    this.targetPos.copy(this.normalLookTarget);
     this.currentLookAt.copy(this.targetPos);
     this.camera.position.copy(this.currentPos);
     this.camera.lookAt(this.currentLookAt);
@@ -141,18 +149,15 @@ export class GameplayCamera {
       );
     } else {
       // Normal pocket / run camera: tightly centered behind ball carrier
+      this.calculateNormalTransform(focusPos, config);
       this.targetPos.lerp(
-        new THREE.Vector3(focusPos.x * 0.7, config.lookHeight, focusPos.z + config.lookAhead),
+        this.normalLookTarget,
         dt * 5.5
       );
       this.targetFov = config.fov;
 
       // Elevated behind player
-      this.desiredPos.set(
-        focusPos.x * 0.5,
-        config.height,
-        focusPos.z - config.backDist
-      );
+      this.desiredPos.copy(this.normalDesiredPos);
     }
 
     // Smooth position interpolation
