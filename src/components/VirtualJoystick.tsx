@@ -36,7 +36,7 @@ export const VirtualJoystick: React.FC<VirtualJoystickProps> = ({ onMove, disabl
       id="virtual-joystick"
       ref={baseRef}
       aria-label="Movement joystick. Drag farther to sprint."
-      className="pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] h-32 w-32 touch-none rounded-full border-2 border-sky-300/35 bg-slate-950/30 shadow-[0_8px_30px_rgba(2,8,23,0.35)] backdrop-blur-sm sm:hidden"
+      className="touch-game-control pointer-events-auto absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))] h-32 w-32 touch-none rounded-full border-2 border-sky-300/35 bg-slate-950/30 shadow-[0_8px_30px_rgba(2,8,23,0.35)] backdrop-blur-sm"
       onPointerDown={(event) => {
         if (disabled || pointerIdRef.current !== null) return;
         pointerIdRef.current = event.pointerId;
