@@ -20,7 +20,9 @@
       const rawSourceEntry = document.querySelector(
         'script[type="module"][src$="/src/main.tsx"]',
       );
-      if (rawSourceEntry && window.location.hostname.endsWith('.github.io')) {
+      const runningFromSourcePage = !import.meta.url.includes('/assets/')
+        && !import.meta.url.includes('/pages-assets/');
+      if (rawSourceEntry && runningFromSourcePage && window.location.hostname.endsWith('.github.io')) {
         const stylesheet = document.createElement('link');
         stylesheet.rel = 'stylesheet';
         stylesheet.href = './pages-assets/app.css?v=mobile-controls-1';
