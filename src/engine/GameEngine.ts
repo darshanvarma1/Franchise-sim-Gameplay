@@ -34,6 +34,7 @@ import {
 import { resetDrive, resolveOffensivePlay } from '../football/GameRules';
 import { predictRoutePosition } from '../football/RouteMath';
 import { sampleDropback } from '../football/DropbackMath';
+import { mapControlDirection } from '../input/ControlMath';
 import { sounds } from '../audio/SoundEffects';
 
 export interface ReceiverScreenPosition {
@@ -566,11 +567,12 @@ export class GameEngine {
 
     // Movement direction from user input (WASD)
     const attackDirection = player.side === 'OFFENSE' ? 1 : -1;
-    const inputDir = new THREE.Vector3(
+    const controlDirection = mapControlDirection(
       this.input.lateral,
-      0,
-      this.input.forward * attackDirection
+      this.input.forward,
+      attackDirection
     );
+    const inputDir = new THREE.Vector3(controlDirection.x, 0, controlDirection.z);
     const hasInput = inputDir.lengthSq() > 0.01;
 
     let targetSpeed = 0;

@@ -14,6 +14,7 @@ import { predictRoutePosition } from '../src/football/RouteMath.ts';
 import { sampleJoystick } from '../src/input/JoystickMath.ts';
 import { classifyThrowGesture } from '../src/input/ThrowGesture.ts';
 import { sampleDropback } from '../src/football/DropbackMath.ts';
+import { mapControlDirection } from '../src/input/ControlMath.ts';
 
 const throwTypes = ['BULLET', 'TOUCH', 'LOB'];
 const distances = [8, 20, 40];
@@ -136,6 +137,22 @@ assert.ok(forwardStick.forward > 0 && Math.abs(forwardStick.lateral) < 1e-9);
 const sprintStick = sampleJoystick(100, 0, 50);
 assert.equal(sprintStick.lateral, 1);
 assert.equal(sprintStick.sprint, true);
+
+assert.deepEqual(
+  mapControlDirection(1, 1, 1),
+  { x: -1, z: 1 },
+  'Offense screen-right input must move toward screen right while forward remains downfield'
+);
+assert.deepEqual(
+  mapControlDirection(-1, 0, 1),
+  { x: 1, z: 0 },
+  'Offense screen-left input must not be mirrored'
+);
+assert.deepEqual(
+  mapControlDirection(1, 1, -1),
+  { x: 1, z: -1 },
+  'Return controls must remain screen-relative when the camera reverses'
+);
 
 assert.equal(classifyThrowGesture(0), 'LOB');
 assert.equal(classifyThrowGesture(179), 'LOB');

@@ -25,10 +25,10 @@
       if (rawSourceEntry && runningFromSourcePage && window.location.hostname.endsWith('.github.io')) {
         const stylesheet = document.createElement('link');
         stylesheet.rel = 'stylesheet';
-        stylesheet.href = './pages-assets/app.css?v=mobile-controls-2';
+        stylesheet.href = './pages-assets/app.css?v=controls-fix-1';
         document.head.appendChild(stylesheet);
 
-        const pagesBundle = './pages-assets/app.js?v=mobile-controls-2';
+        const pagesBundle = './pages-assets/app.js?v=controls-fix-1';
         import(/* @vite-ignore */ pagesBundle).catch((error) => {
           console.error('Unable to load the GitHub Pages gameplay bundle.', error);
         });
