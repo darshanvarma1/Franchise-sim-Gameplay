@@ -13,6 +13,24 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script type="module">
+      // The preferred GitHub Pages workflow serves Vite's dist/ artifact. If the
+      // repository's legacy branch publisher runs afterward, boot the checked-in
+      // production bundle instead of attempting to execute TypeScript in-browser.
+      const rawSourceEntry = document.querySelector(
+        'script[type="module"][src$="/src/main.tsx"]',
+      );
+      if (rawSourceEntry && window.location.hostname.endsWith('.github.io')) {
+        const stylesheet = document.createElement('link');
+        stylesheet.rel = 'stylesheet';
+        stylesheet.href = './pages-assets/app.css?v=28574ba';
+        document.head.appendChild(stylesheet);
+
+        const pagesBundle = './pages-assets/app.js?v=28574ba';
+        import(/* @vite-ignore */ pagesBundle).catch((error) => {
+          console.error('Unable to load the GitHub Pages gameplay bundle.', error);
+        });
+      }
+    </script>
   </body>
 </html>
-
