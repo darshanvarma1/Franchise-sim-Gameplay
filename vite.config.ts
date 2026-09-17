@@ -3,8 +3,11 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({command}) => {
   return {
+    // GitHub Pages hosts this project below /Franchise-sim-Gameplay/.
+    // Keep the AI Studio/local development server at the site root.
+    base: command === 'build' ? '/Franchise-sim-Gameplay/' : '/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
